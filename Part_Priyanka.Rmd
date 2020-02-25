@@ -1,0 +1,614 @@
+---
+title: "Analyzing Stop and Frisk Data in New York"
+author: "Priyanka and Samuel"
+date: "12/17/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, dpi = 300)
+```
+
+```{r packageCheck, include=FALSE}
+mypacks <- c("ggplot2","dplyr","readr","tidyr", "ROCR", "boot","class","randomForest","e1071", "stringr","partykit","rpart", "sp", "glmnet","forcats","tidyverse","caret", "readr", "readxl", "curl", "colourvalues", "downloader", "forcats")  # what packages are needed?
+packs <- installed.packages()   # find installed package list
+install.me <- mypacks[!(mypacks %in% packs[,"Package"])]  #what needs to be installed?
+if (length(install.me) >= 1) install.packages(install.me, repos = "http://cran.us.r-project.org")   # install (if needed)
+lapply(mypacks, library, character.only=TRUE)  # load all packages
+```
+
+## Project Background and Motivation
+
+The Stop, Question and Frisk program is a practice, utilized by New York City Police Department (NYPD), of temporarily detaining, questioning, and at times searching civilians  on the street for weapons and other contrabands (needs reivision). It is also called "Terry Stop" due to the Supreme Coourt ruling of Terry v. Ohio (1968). 
+[Whether the rule is prevents crime]
+- https://crim.sas.upenn.edu/fact-check/does-stop-and-frisk-reduce-crime
+
+While it had been used previously by the police as a method to deter crime, it was championed by Mayor Bloomberg when he was elected in late 2002. Since then, there has been a lot of controvery surrounding the Stop and Frisk practice, It has been sited as being discrimnatory, as many have claimed that there are racist motivations in choosing who gets stopped and then frisked. In 2008, a state judge ruled that the police department had to publicly release information regarding this practice. A major turning point was the 2013 court case Floyd v. City of New York and a subsequent NYPD mandate that requires officers to thoroughly justify the reason for making a stop. This was also the beginning of de Blasio's term, who pledged that the Stop and Frisk would be thoroughly examined and made more fair and useful.
+
+## Project Objective
+
+One of the major reasons given for the Stop and Frisk policy is the amount of crime in New York. Therefore, we begin by creating a visualization tool to the crime by year and region in New York. This will allow us to get better intution for how crime changes by area and year in New York. Next, many critics of the Stop and Frisk policy claim that it isn't actually effective in deterring crime. Therefore, we'll be visualing how this program has changed the rate of crime. Finally, we seek to determine how just the this practice is, and whether any policy changes have impacted how equitable it is. Therefore, we begin by determining if areas with higher crime rates also have individuals being stopped and frisked more, as one would expect. We then will see if any changes in policy and administration have effected how fair this policy is. While much analysis has been done on the discriminatory practices of actually stopping the individuals, not much has been done on how individuals are then chosen to be searched or frisked. We therefore analyze what are the main factors into determining this over three "eras" of policy change, which we go into more detail about in the relevant section, to then compare how the policy changes have affected this practice.
+
+## Data Used
+
+The data is found in the following Drive folder: http://bit.ly/DSFinalProjectData
+
+There were 2 pieces of data we used, the first was data about Crime in New York by Precinct from 2000-2018. The data came from the New York State Police Department (https://www1.nyc.gov/assets/nypd/). The second is the Stop and Frisk data collected by the New York Police Department from 2003-2018 for each individual they stopped. For 2018, this data came from New York's ACLU branch (https://www.nyclu.org) but for the remaining years the data came from the New York State Police Department (https://www1.nyc.gov/assets/nypd/). The Stop and Frisk data for 2017-2018 was in a different format than the data from 2003-2016, Therefore, we'll be using data from 2003-2018 for visualization and part of our analysis. However, for our analysis related to the factors in determining whether or not an individual is searched or frisked, the data we use is from 2003-2016 to allow for comparisons between the years.
+
+```{r import, echo = FALSE, warning = FALSE}
+# Files included in the Google Drive, so assuming files are imported, leave code as is. If files are not imported, comment out import code below.
+
+#importing frisk data
+# url <- "https://www.nyclu.org/sites/default/files/field_documents/2018_sqf_database.xlsx"
+# destfile <- "2018_sqf_database.xlsx"
+# curl::curl_download(url, destfile)
+# # Create a vector of Excel files to read
+# files.to.read = list.files(pattern="xlsx")
+# 
+# # Read each file and write it to csv
+# library("rio")
+# xls <- dir(pattern = "xlsx")
+# created <- mapply(convert, xls, gsub("xlsx", "csv", xls))
+# unlink(xls) # delete xlsx files
+SQF2018 <- read.csv("2018_sqf_database.csv")
+
+
+# url <- "https://www1.nyc.gov/assets/nypd/downloads/excel/analysis_and_planning/stop-question-frisk/sqf-2017.xlsx"
+# destfile <- "2017_sqf_database.xlsx"
+# curl::curl_download(url, destfile)
+# # Create a vector of Excel files to read
+# files.to.read = list.files(pattern="xlsx")
+# 
+# # Read each file and write it to csv
+# library("rio")
+# xls <- dir(pattern = "xlsx")
+# created <- mapply(convert, xls, gsub("xlsx", "csv", xls))
+# unlink(xls) # delete xlsx files
+SQF2017 <- read.csv("2017_sqf_database.csv")
+
+
+# url <- "https://www.nyclu.org/sites/default/files/field_documents/2016_sqf_database.xlsx"
+# destfile <- "2016_sqf_database.xlsx"
+# curl::curl_download(url, destfile)
+# # Create a vector of Excel files to read
+# files.to.read = list.files(pattern="xlsx")
+# 
+# # Read each file and write it to csv
+# library("rio")
+# xls <- dir(pattern = "xlsx")
+# created <- mapply(convert, xls, gsub("xlsx", "csv", xls))
+# unlink(xls) # delete xlsx files
+SQF2016 <- read.csv("2016_sqf_database.csv")
+# 
+# url <- "https://www1.nyc.gov/assets/nypd/downloads/excel/analysis_and_planning/stop-question-frisk/sqf-2015.csv"
+# curl::curl_download(url, "sqf-2015.csv")
+SQF2015 <- read.csv("sqf-2015.csv")
+```
+
+```{r import, echo = FALSE, warning = FALSE}
+# url <- "https://www1.nyc.gov/assets/nypd/downloads/zip/analysis_and_planning/stop-question-frisk/sqf-2014-csv.zip"
+# download(url, dest="dataset.zip", mode="wb")
+# unzip ("dataset.zip", exdir = "./")
+SQF2014 <- read.csv("2014.csv")
+
+# url <- "https://www1.nyc.gov/assets/nypd/downloads/zip/analysis_and_planning/stop-question-frisk/sqf-2013-csv.zip"
+# download(url, dest="dataset.zip", mode="wb")
+# unzip ("dataset.zip", exdir = "./")
+SQF2013 <- read.csv("2013.csv")
+
+# url <- "https://www1.nyc.gov/assets/nypd/downloads/zip/analysis_and_planning/stop-question-frisk/sqf-2012-csv.zip"
+# download(url, dest="dataset.zip", mode="wb")
+# unzip ("dataset.zip", exdir = "./")
+SQF2012 <- read.csv("2012.csv")
+
+# url <- "https://www1.nyc.gov/assets/nypd/downloads/zip/analysis_and_planning/stop-question-frisk/sqf-2011-csv.zip"
+# download(url, dest="dataset.zip", mode="wb")
+# unzip ("dataset.zip", exdir = "./")
+SQF2011 <- read.csv("2011.csv")
+
+# url <- "https://www1.nyc.gov/assets/nypd/downloads/zip/analysis_and_planning/stop-question-frisk/sqf-2010-csv.zip"
+# download(url, dest="dataset.zip", mode="wb")
+# unzip ("dataset.zip", exdir = "./")
+SQF2010 <- read.csv("2010.csv")
+
+# url <- "https://www1.nyc.gov/assets/nypd/downloads/zip/analysis_and_planning/stop-question-frisk/sqf-2009-csv.zip"
+# download(url, dest="dataset.zip", mode="wb")
+# unzip ("dataset.zip", exdir = "./")
+SQF2009 <- read.csv("2009.csv")
+
+# url <- "https://www1.nyc.gov/assets/nypd/downloads/zip/analysis_and_planning/stop-question-frisk/sqf-2008-csv.zip"
+# download(url, dest="dataset.zip", mode="wb")
+# unzip ("dataset.zip", exdir = "./")
+SQF2008 <- read.csv("2008.csv")
+
+# url <- "https://www1.nyc.gov/assets/nypd/downloads/zip/analysis_and_planning/stop-question-frisk/sqf-2007-csv.zip"
+# download(url, dest="dataset.zip", mode="wb")
+# unzip ("dataset.zip", exdir = "./")
+SQF2007 <- read.csv("2007.csv")
+
+# url <- "https://www1.nyc.gov/assets/nypd/downloads/zip/analysis_and_planning/stop-question-frisk/sqf-2006-csv.zip"
+# download(url, dest="dataset.zip", mode="wb")
+# unzip ("dataset.zip", exdir = "./")
+SQF2006 <- read.csv("2006.csv")
+
+# url <- "https://www1.nyc.gov/assets/nypd/downloads/zip/analysis_and_planning/stop-question-frisk/sqf-2005-csv.zip"
+# download(url, dest="dataset.zip", mode="wb")
+# unzip ("dataset.zip", exdir = "./")
+SQF2005 <- read.csv("2005.csv")
+
+# url <- "https://www1.nyc.gov/assets/nypd/downloads/zip/analysis_and_planning/stop-question-frisk/sqf-2004-csv.zip"
+# download(url, dest="dataset.zip", mode="wb")
+# unzip ("dataset.zip", exdir = "./")
+SQF2004 <- read.csv("2004.csv")
+
+# url <- "https://www1.nyc.gov/assets/nypd/downloads/zip/analysis_and_planning/stop-question-frisk/sqf-2003-csv.zip"
+# download(url, dest="dataset.zip", mode="wb")
+# unzip ("dataset.zip", exdir = "./")
+SQF2003 <- read.csv("2003.csv")
+```
+
+```{r, echo=FALSE, warning = FALSE}
+# url <- "https://www1.nyc.gov/assets/nypd/downloads/excel/analysis_and_planning/historical-crime-data/seven-major-felony-offenses-by-precinct-2000-2018.xls"
+# destfile <- "crime_by_precinct.xls"
+# curl::curl_download(url, destfile)
+# # Create a vector of Excel files to read
+# files.to.read = list.files(pattern="xls")
+# 
+# # Read each file and write it to csv
+# library("rio")
+# xls <- dir(pattern = "xls")
+# created <- mapply(convert, xls, gsub("xls", "csv", xls))
+# 
+# unlink(xls) # delete xlsx files
+CrimeRates <- read.csv("crime_by_precinct.csv", skip = 2)
+# Cleaning crime rate df
+library(data.table)
+setDT(CrimeRates)[, PCT:=PCT[1L] ,cumsum(PCT!="")]
+CrimeRates <- CrimeRates[CrimeRates$CRIME == "TOTAL SEVEN MAJOR FELONY OFFENSES",]
+yearsAll <- c('2000', '2001', '2002', '2003', '2004', '2005', '2006', '2007', '2008', '2009', '2010', '2011', '2012', '2013', '2014', '2015', '2016', '2017', '2018')
+yearsHave <- c('2003', '2004', '2005', '2006', '2007', '2008', '2009', '2010', '2011', '2012', '2013', '2014', '2015', '2016', '2017', '2018')
+
+colToDrop <- c('X2000', 'X2001', 'X2002', 'X2003', 'X2004', 'X2005', 'X2006', 'X2007', 'X2008', 'X2009', 'X2010', 'X2011', 'X2012', 'X2013', 'X2014', 'X2015', 'X2016', 'X2017', 'X2018', 'CRIME')
+CrimeRates$PCT <- as.numeric(CrimeRates$PCT)
+```
+
+```{r, echo=FALSE}
+
+
+# Finding percentage change compared to previous year
+CrimeChangePercentage <- CrimeRates
+CrimeChangePercentage <- CrimeChangePercentage %>% mutate("2003" = log(X2003, 10)-log(X2002, 10)) %>% mutate("2004" = log(X2004, 10)-log(X2003, 10))%>% mutate("2005" = log(X2005, 10)-log(X2004, 10)) %>% mutate("2006" = log(X2006, 10)-log(X2005, 10)) %>% mutate("2007" = log(X2007, 10)-log(X2006, 10)) %>% mutate("2008" = log(X2008, 10)-log(X2007, 10)) %>% mutate("2009" = log(X2009, 10)-log(X2008, 10)) %>% mutate("2010" = log(X2010, 10)-log(X2009, 10)) %>% mutate("2011" = log(X2011, 10)-log(X2010, 10)) %>% mutate("2012" = log(X2012, 10)-log(X2011, 10)) %>% mutate("2013" = log(X2013, 10)-log(X2012, 10)) %>% mutate("2014" = log(X2014, 10)-log(X2013, 10)) %>% mutate("2015" = log(X2015, 10)-log(X2014, 10)) %>% mutate("2016" = log(X2016, 10)-log(X2015, 10)) %>% mutate("2017" = log(X2017, 10)-log(X2016, 10)) %>% mutate("2018" = log(X2018, 10)-log(X2017, 10))
+CrimeChangePercentage <- CrimeChangePercentage[, !colnames(CrimeChangePercentage) %in% colToDrop] %>% gather(yearsHave, key = "year", value = "crimeChange")
+CrimeChangePercentage$year <- as.numeric(CrimeChangePercentage$year)
+
+# Making new data set: Year, Borough, Crime Rate, Number of Stop and Frisks
+# Graph Crime Rate vs Number, for each Borough to see if they're actually correlated, color by year
+#Making values in terms of Standard Deviations by year
+CrimeRates <- CrimeRates %>% mutate("2000" = scale(X2000)) %>% mutate("2001" = scale(X2001)) %>% mutate("2002" = scale(X2002)) %>% mutate("2003" = scale(X2003)) %>% mutate("2004" = scale(X2004)) %>% mutate("2005" = scale(X2005)) %>% mutate("2006" = scale(X2006)) %>% mutate("2007" = scale(X2007)) %>% mutate("2008" = scale(X2008)) %>% mutate("2009" = scale(X2009)) %>% mutate("2010" = scale(X2010)) %>% mutate("2011" = scale(X2011)) %>% mutate("2012" = scale(X2012)) %>% mutate("2013" = scale(X2013)) %>% mutate("2014" = scale(X2014)) %>% mutate("2015" = scale(X2015)) %>% mutate("2016" = scale(X2016)) %>% mutate("2017" = scale(X2017)) %>% mutate("2018" = scale(X2018))
+CrimeRates <- CrimeRates[, !colnames(CrimeRates) %in% colToDrop] %>% gather(yearsAll, key = "year", value = "crimeSD")
+CrimeRates$year <- as.numeric(CrimeRates$year)
+```
+
+
+```{r, echo = FALSE}
+# Data frame creation for seeing if crime rate of previous year effects the stop and frisk amount
+SQF2017 <- SQF2017 %>% mutate('pct' = SQF2017$STOP_LOCATION_PRECINCT, 'year' = SQF2017$YEAR2)
+SQF2018 <- SQF2018 %>% mutate('pct' = SQF2018$STOP_LOCATION_PRECINCT, 'year' = SQF2018$YEAR2)
+CrimeRates <- CrimeRates %>% mutate(year = year+1)
+```
+
+## Visualizations
+
+## Effect of Stop and Frisk on Crime Rates
+To begin, we wanted to analyze whether stop and drisk actually seemed to be having any impact on the crime rate seen in an area. Therefore, using the data described above, we decided to visualize the effect of the stop and frisks on the crime rate of an area, by precinct. To do this, we first normalized the number of stops per precinct over a year. We then found the rate of change in the amount of crime per precinct for each year we had data on. Finally, we graphed this information, as shown below.
+
+```{r, echo=FALSE, warning=FALSE}
+# Gives frame with pct, year, and count with the crime changw
+temp <- SQF2003 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+crimeAndCount <- merge(CrimeChangePercentage, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+
+temp <- SQF2004 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeChangePercentage, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2005 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeChangePercentage, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2006 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeChangePercentage, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2007 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeChangePercentage, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2008 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeChangePercentage, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2009 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeChangePercentage, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2010 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeChangePercentage, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2011 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeChangePercentage, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2012 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeChangePercentage, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2013 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeChangePercentage, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2014 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeChangePercentage, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2015 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeChangePercentage, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2016 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeChangePercentage, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2017 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeChangePercentage, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2018 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeChangePercentage, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+```
+
+```{r, warning = FALSE, echo=FALSE}
+# Graphing standard deviation of crime count vs standard deviation number of stop and frisks by year, and then coloring by year
+# No trend in data at all
+ggplot(crimeAndCount, mapping = aes(x = crimeChange, y = count)) + geom_point(mapping=aes(color = year)) + geom_smooth(method="lm", color="red", aes(x = crimeChange, y = count)) + ggtitle("Change in Crime Rate vs Amount of Stop and Frisks per Precinct") + xlab("Change in Crime Rate") + ylab("Amount of Stop and Frisks")
+```
+
+```{r, warning = FALSE, echo=FALSE}
+# Seperating by year in case poilicy changes had an effect, no clear trend still
+ggplot(crimeAndCount, mapping = aes(x = crimeChange, y = count)) + geom_point() + geom_smooth(method="lm", color="red", aes(x = crimeChange, y = count)) + facet_wrap(~year) + ggtitle("Change in Crime Rate vs Amount of Stop and Frisks per Precinct by Year") + xlab("Change in Crime Rate") + ylab("Amount of Stop and Frisks")
+```
+
+As we can see, there isn't always a clear pattern in a relationship between the change of the number of crime and the scaled amount of stop and frisks seen in a precinct. If the stop and frisks did have an effect on crime, we would have expected there to be a strongly negative correlation. However, there doesn't seem to be any relationship between these two values. When we seperate the values by year, we can also see sometimes there were some negative trends, which means the crime decreased as there were more stop and frisks, but also have some years with a positive trend meaning that areas with more stop and frisk also had an increase in crime. Therefore, there doesn't seem to be a clear connection between the number of stop and frisks and the change in crime of an area. Therefore, this suggests that stop and frisks didn't seem to serve the purpose they set out accomplish -- the data doesn't suggest clear alleviations in the cime rate.
+
+# Factors for Stop and Frisk Individuals being Searched or Frisked
+Because the stop and frisks didn't seem to be helping the crime rate in an area, we next wanted to figure out exactly how these stop and frisks were being conducted -- what factors lead to someone being more likely to be chosen for a stop and frisk?
+
+## Relationship Between Crime and Stop And Frisk
+The first factor we analayzed which may lead to there being more stop and frisks in an area is how much crime happens there. We'd expect areas to have more crimes overall to also have a higher rate of stop and frisks, because the purpose of the stop and frisks would be to try and target these high crime areas. We therefore worked on visualizing a relationship between the amount of crime in an area and the amount of stop and frisks in an area, by year. We did this by standardizing the amount of crime per precinct by year, and then standardizing the amount of stop and frisks conducted per precinct by year. We then plotted these values, as shown below.
+
+```{r, echo=FALSE, warning=FALSE}
+# Gives frame with pct, year, and count
+temp <- SQF2003 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+crimeAndCount <- merge(CrimeRates, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+
+temp <- SQF2004 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeRates, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2005 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeRates, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2006 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeRates, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2007 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeRates, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2008 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeRates, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2009 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeRates, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2010 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeRates, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2011 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeRates, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2012 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeRates, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2013 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeRates, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2014 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeRates, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2015 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeRates, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2016 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeRates, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+  
+temp <- SQF2017 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeRates, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+
+temp <- SQF2018 %>% group_by(year, pct) %>% summarize(count = n()) %>% ungroup() %>% mutate(count = scale(count))
+temp <- merge(CrimeRates, temp, by.x = c("PCT", "year"), by.y = c("pct", "year"))
+crimeAndCount <- rbind(temp,crimeAndCount)
+```
+
+```{r, warning = FALSE, echo = FALSE}
+# Graphing standard deviation of crime count vs standard deviation number of stop and frisks by year, and then coloring by year
+# No trend in data at all
+ggplot(crimeAndCount, mapping = aes(x = crimeSD, y = count)) + geom_point(mapping=aes(color = year)) + geom_smooth(method="lm", color="red", aes(x = crimeSD, y = count)) + ggtitle("Amount of Crime vs Amount of Stop and Frisks per Precinct") + xlab("Amount of Crime") + ylab("Amount of Stop and Frisks")
+```
+
+```{r, warning = FALSE, echo = FALSE}
+# Seperating by year in case poilicy changes had an effect, no clear trend still
+ggplot(crimeAndCount, mapping = aes(x = crimeSD, y = count)) + geom_point() + geom_smooth(method="lm", color="red", aes(x = crimeSD, y = count)) + facet_wrap(~year) + ggtitle("Amount of Crime vs Amount of Stop and Frisks per Precinct by Year") + xlab("Amount of Crime") + ylab("Amount of Stop and Frisks")
+```
+
+Through these graphs, we can see again there is no trend in values or clear positive trend, in fact there is a slightly negative trend. This means that even though areas had a high amount of crime, there wasn't a corresponding high amount of stop and frisks happening in that area. One may think this is due to the stop and frisks decreasing the amount of crime in that year, but as we saw in the above analysis there was no relationship between these two variables. Therefore, we can see that stop and frisks don't affect the crime rate, and it's also not based on where there is more crime. Therefore, there must be other factors in play, in determining which individuals were more likely to be stopped and frisked. 
+
+## What Factors Actually Matter: Analysis of Effects of Change on Policy
+
+Because crime rate didn't have a clear relationship with the amount of stop and frisks, we then turned to the data of the stop and frisks to see what were the main factors which lead to individual being frisked or searched. The way we did this was to use a random forest model to find given the variables in the data whether or not someone would be frisked/searched or not. We then found the most important variables for each of the random forests. We made a random forest for every other year, and then found the important factors on them. We then averaged the importance across the years in the different groups of years. We chose the years 2003-2007, 2008-2012, and then 2013-2016 as our three eras for which to find which variables were important. We chose these years because of policy and administration changes. In 2007, ther was a ruling which said that the stop and frisk had to be publicly available. Following this ruling, there was a lot of analysis on the data and public outcry over discrimnatory practices. In 2013, Bloomberg's mayoral administration came to an end. Bloomberg was a major proponent for stop and frisk, and following de Blasio's entrance as mayor, there were large policy changes in how the stop and frisk was conducted. One policy change, due to a court case, enforced that thorough justification must be given for why someone is stopped and searched.
+
+```{r, echo=FALSE}
+# Determine changes from 2003-2007, 2008-2012, then 2013-2016
+# Finding most important coefficients for group 1
+rm(crimeAndCount)
+rm(CrimeChangePercentage)
+rm(CrimeRates)
+```
+
+# ```{r, echo=FALSE, warning=FALSE}
+# set2Cols <- Reduce(intersect, list(colnames(SQF2009), colnames(SQF2010), colnames(SQF2011), colnames(SQF2012), colnames(SQF2008)))
+# set2 <- SQF2008[, set2Cols] 
+# set2 <- rbind(set2,SQF2009[, set2Cols])
+# set2 <- rbind(set2,SQF2010[, set2Cols])
+# set2 <- rbind(set2,SQF2011[, set2Cols])
+# set2 <- rbind(set2,SQF2012[, set2Cols])
+# set2 <- set2 %>% mutate(stopOrFrisk = (frisked == "Y" | searched == "Y")) %>% select(-c("frisked", "searched"))
+# set2 <- set2 %>% select_if(~ (length(unique(.)) > 1 & length(unique(.)) < 10))
+# colToDrop <- colnames(set2)[colSums(is.na(set2)) > 0]
+# set2 <- set2 %>% select(-colToDrop) %>% sample_frac(.1)
+# rffit <- randomForest(stopOrFrisk ~ ., data=set2, ntree=5, keep.forest=FALSE, importance=TRUE)
+# importance(rffit) # relative importance of predictors (highest <-> most important)
+# rm(set2)
+# ```
+
+
+```{r, echo = FALSE, warning=FALSE}
+SQF2003 <- SQF2003 %>% mutate(stopOrFrisk = (frisked == "Y" | searched == "Y")) %>% select(-c("frisked", "searched"))
+```
+
+```{r, echo = FALSE, warning=FALSE}
+SQF2003 <- SQF2003 %>% select_if(~ length(unique(.)) > 1 & length(unique(.)) < 52)
+colToDrop <- colnames(SQF2003)[colSums(is.na(SQF2003)) > 0]
+SQF2003 <- SQF2003 %>% select(-colToDrop) %>% sample_frac(.1)
+rffit <- randomForest(stopOrFrisk ~ ., data=SQF2003, ntree=5, keep.forest=FALSE, importance=TRUE)
+coef03 <- importance(rffit ) # relative importance of predictors (highest <-> most important)
+coef03 <- as.data.frame(as.table(coef03))
+coef03 <- coef03 %>% filter(Var2 != "IncNodePurity") %>% arrange(desc(Freq)) %>% mutate(importance03 = row_number()) %>% select(Var1, importance03)
+rm(SQF2003)
+```
+
+```{r, echo = FALSE, warning=FALSE}
+SQF2004 <- SQF2004 %>% mutate(stopOrFrisk = (frisked == "Y" | searched == "Y")) %>% select(-c("frisked", "searched"))
+SQF2004 <- SQF2004 %>% select_if(~ (length(unique(.)) > 1 & length(unique(.)) < 52))
+colToDrop <- colnames(SQF2004)[colSums(is.na(SQF2004)) > 0]
+SQF2004 <- SQF2004 %>% select(-colToDrop) %>% sample_frac(.1)
+rffit <- randomForest(stopOrFrisk ~ ., data=SQF2004, ntree=5, keep.forest=FALSE, importance=TRUE)
+coef04 <- importance(rffit) # relative importance of predictors (highest <-> most important)
+coef04 <- as.data.frame(as.table(coef04))
+coef04 <- coef04 %>% filter(Var2 != "IncNodePurity") %>% arrange(desc(Freq)) %>% mutate(importance04 = row_number()) %>% select(Var1, importance04)
+rm(SQF2004)
+```
+
+```{r, echo = FALSE, warning=FALSE}
+SQF2005 <- SQF2005 %>% mutate(stopOrFrisk = (frisked == "Y" | searched == "Y")) %>% select(-c("frisked", "searched"))
+SQF2005 <- SQF2005 %>% select_if(~ (length(unique(.)) > 1 & length(unique(.)) < 52))
+colToDrop <- colnames(SQF2005)[colSums(is.na(SQF2005)) > 0]
+SQF2005 <- SQF2005%>% select(-colToDrop) %>% sample_frac(.1)
+rffit <- randomForest(stopOrFrisk ~ ., data=SQF2005, ntree=5, keep.forest=FALSE, importance=TRUE)
+coef05 <- importance(rffit) # relative importance of predictors (highest <-> most important)
+coef05 <- as.data.frame(as.table(coef05))
+coef05 <- coef05 %>% filter(Var2 != "IncNodePurity") %>% arrange(desc(Freq)) %>% mutate(importance05 = row_number()) %>% select(Var1, importance05)
+rm(SQF2005)
+```
+
+```{r, echo = FALSE, warning=FALSE}
+SQF2006 <- SQF2006 %>% mutate(stopOrFrisk = (frisked == "Y" | searched == "Y")) %>% select(-c("frisked", "searched"))
+SQF2006 <- SQF2006 %>% select_if(~ (length(unique(.)) > 1 & length(unique(.)) < 52))
+colToDrop <- colnames(SQF2006)[colSums(is.na(SQF2006)) > 0]
+SQF2006 <- SQF2006 %>% select(-colToDrop) %>% sample_frac(.1)
+rffit <- randomForest(stopOrFrisk ~ ., data=SQF2006, ntree=5, keep.forest=FALSE, importance=TRUE)
+coef06 <- importance(rffit) # relative importance of predictors (highest <-> most important)
+coef06 <- as.data.frame(as.table(coef06))
+coef06 <- coef06 %>% filter(Var2 != "IncNodePurity") %>% arrange(desc(Freq)) %>% mutate(importance06 = row_number()) %>% select(Var1, importance06)
+rm(SQF2006)
+```
+
+```{r, echo = FALSE, warning=FALSE}
+SQF2007 <- SQF2007 %>% mutate(stopOrFrisk = (frisked == "Y" | searched == "Y")) %>% select(-c("frisked", "searched"))
+SQF2007 <- SQF2007 %>% select_if(~ (length(unique(.)) > 1 & length(unique(.)) < 52))
+colToDrop <- colnames(SQF2007)[colSums(is.na(SQF2007)) > 0]
+SQF2007 <- SQF2007 %>% select(-colToDrop) %>% sample_frac(.1)
+rffit <- randomForest(stopOrFrisk ~ ., data=SQF2007, ntree=5, keep.forest=FALSE, importance=TRUE)
+coef07 <- importance(rffit) # relative importance of predictors (highest <-> most important)
+coef07 <- as.data.frame(as.table(coef07))
+coef07 <- coef07 %>% filter(Var2 != "IncNodePurity") %>% arrange(desc(Freq)) %>% mutate(importance07 = row_number()) %>% select(Var1, importance07)
+rm(SQF2007)
+```
+
+```{r, echo = FALSE, warning = FALSE}
+merged <- coef03
+merged <- merge(merged, coef04, by.x = "Var1", by.y = "Var1")
+merged <- merge(merged, coef05, by.x = "Var1", by.y = "Var1")
+merged <- merge(merged, coef06, by.x = "Var1", by.y = "Var1")
+merged <- merge(merged, coef07, by.x = "Var1", by.y = "Var1")
+merged <- merged %>% rowwise %>% mutate(Avg=mean(c(importance03, importance04, importance05, importance06, importance07))) %>% arrange(Avg) 
+```
+
+```{r, echo = FALSE, warning=FALSE}
+SQF2008 <- SQF2008 %>% mutate(stopOrFrisk = (frisked == "Y" | searched == "Y")) %>% select(-c("frisked", "searched"))
+SQF2008 <- SQF2008 %>% select_if(~ (length(unique(.)) > 1 & length(unique(.)) < 52))
+colToDrop <- colnames(SQF2008)[colSums(is.na(SQF2008)) > 0]
+SQF2008 <- SQF2008 %>% select(-colToDrop) %>% sample_frac(.1)
+rffit <- randomForest(stopOrFrisk ~ ., data=SQF2008, ntree=5, keep.forest=FALSE, importance=TRUE)
+coef08 <- importance(rffit) # relative importance of predictors (highest <-> most important)
+coef08 <- as.data.frame(as.table(coef08))
+coef08 <- coef08 %>% filter(Var2 != "IncNodePurity") %>% arrange(desc(Freq)) %>% mutate(importance08 = row_number()) %>% select(Var1, importance08)
+rm(SQF2008)
+```
+
+```{r, echo = FALSE, warning=FALSE}
+SQF2009 <- SQF2009 %>% mutate(stopOrFrisk = (frisked == "Y" | searched == "Y")) %>% select(-c("frisked", "searched"))
+SQF2009 <- SQF2009 %>% select_if(~ (length(unique(.)) > 1 & length(unique(.)) < 52))
+colToDrop <- colnames(SQF2009)[colSums(is.na(SQF2009)) > 0]
+SQF2009 <- SQF2009 %>% select(-colToDrop) %>% sample_frac(.1)
+rffit <- randomForest(stopOrFrisk ~ ., data=SQF2009, ntree=5, keep.forest=FALSE, importance=TRUE)
+coef09 <- importance(rffit) # relative importance of predictors (highest <-> most important)
+coef09 <- as.data.frame(as.table(coef09))
+coef09 <- coef09 %>% filter(Var2 != "IncNodePurity") %>% arrange(desc(Freq)) %>% mutate(importance09 = row_number()) %>% select(Var1, importance09)
+rm(SQF2009)
+```
+
+```{r, echo = FALSE, warning=FALSE}
+SQF2010 <- SQF2010 %>% mutate(stopOrFrisk = (frisked == "Y" | searched == "Y")) %>% select(-c("frisked", "searched"))
+SQF2010 <- SQF2010 %>% select_if(~ (length(unique(.)) > 1 & length(unique(.)) < 52))
+colToDrop <- colnames(SQF2010)[colSums(is.na(SQF2010)) > 0]
+SQF2010 <- SQF2010 %>% select(-colToDrop) %>% sample_frac(.1)
+rffit <- randomForest(stopOrFrisk ~ ., data=SQF2010, ntree=5, keep.forest=FALSE, importance=TRUE)
+coef10 <- importance(rffit) # relative importance of predictors (highest <-> most important)
+coef10 <- as.data.frame(as.table(coef10))
+coef10 <- coef10 %>% filter(Var2 != "IncNodePurity") %>% arrange(desc(Freq)) %>% mutate(importance10 = row_number()) %>% select(Var1, importance10)
+rm(SQF2010)
+```
+
+```{r, echo = FALSE, warning=FALSE}
+SQF2011 <- SQF2011 %>% mutate(stopOrFrisk = (frisked == "Y" | searched == "Y")) %>% select(-c("frisked", "searched"))
+SQF2011 <- SQF2011 %>% select_if(~ (length(unique(.)) > 1 & length(unique(.)) < 52))
+colToDrop <- colnames(SQF2011)[colSums(is.na(SQF2011)) > 0]
+SQF2011 <- SQF2011 %>% select(-colToDrop) %>% sample_frac(.1)
+rffit <- randomForest(stopOrFrisk ~ ., data=SQF2011, ntree=5, keep.forest=FALSE, importance=TRUE)
+coef11 <- importance(rffit) # relative importance of predictors (highest <-> most important)
+coef11 <- as.data.frame(as.table(coef11))
+coef11 <- coef11 %>% filter(Var2 != "IncNodePurity") %>% arrange(desc(Freq)) %>% mutate(importance11 = row_number()) %>% select(Var1, importance11)
+rm(SQF2011)
+```
+
+```{r, echo = FALSE, warning=FALSE}
+SQF2012 <- SQF2012 %>% mutate(stopOrFrisk = (frisked == "Y" | searched == "Y")) %>% select(-c("frisked", "searched"))
+SQF2012 <- SQF2012 %>% select_if(~ (length(unique(.)) > 1 & length(unique(.)) < 52))
+colToDrop <- colnames(SQF2012)[colSums(is.na(SQF2012)) > 0]
+SQF2012 <- SQF2012 %>% select(-colToDrop) %>% sample_frac(.1)
+rffit <- randomForest(stopOrFrisk ~ ., data=SQF2012, ntree=5, keep.forest=FALSE, importance=TRUE)
+coef12 <- importance(rffit) # relative importance of predictors (highest <-> most important)
+coef12 <- as.data.frame(as.table(coef12))
+coef12 <- coef12 %>% filter(Var2 != "IncNodePurity") %>% arrange(desc(Freq)) %>% mutate(importance12 = row_number()) %>% select(Var1, importance12)
+rm(SQF2012)
+```
+
+
+```{r, echo = FALSE, warning = FALSE}
+merged1 <- coef08
+merged1 <- merge(merged1, coef09, by.x = "Var1", by.y = "Var1")
+merged1 <- merge(merged1, coef10, by.x = "Var1", by.y = "Var1")
+merged1 <- merge(merged1, coef11, by.x = "Var1", by.y = "Var1")
+merged1 <- merge(merged1, coef12, by.x = "Var1", by.y = "Var1")
+merged1 <- merged1 %>% rowwise %>% mutate(Avg=mean(c(importance08, importance09, importance10, importance11, importance12))) %>% arrange(Avg) 
+```
+
+
+```{r, echo = FALSE, warning=FALSE}
+SQF2013 <- SQF2013 %>% mutate(stopOrFrisk = (frisked == "Y" | searched == "Y")) %>% select(-c("frisked", "searched"))
+SQF2013 <- SQF2013 %>% select_if(~ (length(unique(.)) > 1 & length(unique(.)) < 52))
+colToDrop <- colnames(SQF2013)[colSums(is.na(SQF2013)) > 0]
+SQF2013 <- SQF2013 %>% select(-colToDrop) %>% sample_frac(.1)
+rffit <- randomForest(stopOrFrisk ~ ., data=SQF2013, ntree=5, keep.forest=FALSE, importance=TRUE)
+coef13 <- importance(rffit) # relative importance of predictors (highest <-> most important)
+coef13 <- as.data.frame(as.table(coef13))
+coef13 <- coef13 %>% filter(Var2 != "IncNodePurity") %>% arrange(desc(Freq)) %>% mutate(importance13 = row_number()) %>% select(Var1, importance13)
+rm(SQF2013)
+```
+
+```{r, echo = FALSE, warning=FALSE}
+SQF2014 <- SQF2014 %>% mutate(stopOrFrisk = (frisked == "Y" | searched == "Y")) %>% select(-c("frisked", "searched"))
+SQF2014 <- SQF2014 %>% select_if(~ (length(unique(.)) > 1 & length(unique(.)) < 52))
+colToDrop <- colnames(SQF2014)[colSums(is.na(SQF2014)) > 0]
+SQF2014 <- SQF2014 %>% select(-colToDrop) %>% sample_frac(.1)
+rffit <- randomForest(stopOrFrisk ~ ., data=SQF2014, ntree=5, keep.forest=FALSE, importance=TRUE)
+coef14<- importance(rffit) # relative importance of predictors (highest <-> most important)
+coef14 <- as.data.frame(as.table(coef14))
+coef14 <- coef14 %>% filter(Var2 != "IncNodePurity") %>% arrange(desc(Freq)) %>% mutate(importance14 = row_number()) %>% select(Var1, importance14)
+rm(SQF2014)
+```
+
+```{r, echo = FALSE, warning=FALSE}
+SQF2015 <- SQF2015 %>% mutate(stopOrFrisk = (frisked == "Y" | searched == "Y")) %>% select(-c("frisked", "searched"))
+SQF2015 <- SQF2015 %>% select_if(~ (length(unique(.)) > 1 & length(unique(.)) < 52))
+colToDrop <- colnames(SQF2015)[colSums(is.na(SQF2015)) > 0]
+SQF2015 <- SQF2015 %>% select(-colToDrop) %>% sample_frac(.1)
+rffit <- randomForest(stopOrFrisk ~ ., data=SQF2015, ntree=5, keep.forest=FALSE, importance=TRUE)
+coef15 <- importance(rffit) # relative importance of predictors (highest <-> most important)
+coef15 <- as.data.frame(as.table(coef15))
+coef15 <- coef15 %>% filter(Var2 != "IncNodePurity") %>% arrange(desc(Freq)) %>% mutate(importance15 = row_number()) %>% select(Var1, importance15)
+rm(SQF2015)
+```
+
+```{r, echo = FALSE, warning=FALSE}
+SQF2016 <- SQF2016 %>% mutate(stopOrFrisk = (frisked == "Y" | searched == "Y")) %>% select(-c("frisked", "searched"))
+SQF2016 <- SQF2016 %>% select_if(~ (length(unique(.)) > 1 & length(unique(.)) < 52))
+colToDrop <- colnames(SQF2016)[colSums(is.na(SQF2016)) > 0]
+SQF2016 <- SQF2016 %>% select(-colToDrop) %>% sample_frac(.1)
+rffit <- randomForest(stopOrFrisk ~ ., data=SQF2016, ntree=5, keep.forest=FALSE, importance=TRUE)
+coef16 <- importance(rffit) # relative importance of predictors (highest <-> most important)
+coef16 <- as.data.frame(as.table(coef16))
+coef16 <- coef16 %>% filter(Var2 != "IncNodePurity") %>% arrange(desc(Freq)) %>% mutate(importance16 = row_number()) %>% select(Var1, importance16)
+rm(SQF2016)
+```
+
+```{r, echo = FALSE, warning = FALSE}
+merged2 <- coef13
+merged2 <- merge(merged2, coef14, by.x = "Var1", by.y = "Var1")
+merged2 <- merge(merged2, coef15, by.x = "Var1", by.y = "Var1")
+merged2 <- merge(merged2, coef16, by.x = "Var1", by.y = "Var1")
+merged2 <- merged2 %>% rowwise %>% mutate(Avg=mean(c(importance13, importance14, importance15, importance16))) %>% arrange(Avg) 
+```
+
+# ```{r, echo = FALSE, warning = FALSE}
+# merged %>% arrange(Avg) %>% select(Var1, Avg) %>% head()
+# merged1 %>% arrange(Avg) %>% select(Var1, Avg) %>% head()
+# merged2 %>% arrange(Avg) %>% select(Var1, Avg) %>% head()
+# ```
+
+The 6 most important factors for whether or not somone was searched or frisked after being stopped are:
+2003-2007: Furitive Movements, Inapprioriate Attire for Season, Suspicious Bulge, Refusal to Comply with Officer's Directions, Actions Engaging in a Violent Crime, and Other
+2008-2012: Furitive Movements, Actions Engaging in a Violent Crime, Inapprioriate Attire for Season, Refusal to Comply with Officer's Directions, Suspicious Bulge, and Other 
+2013-2016: Furitive Movements, Actions Engaging in a Violent Crime, Risk from Action of Engaging in Violent Crime, Suspicion of Weapons, Refusal to Comply with Officer's Directions, Inapprioriate Attire for Season
+
+For the first 2 eras, the top 6 reasons were the same, but the order in which the reasons occured was different. In the third era, Actional of Violent Crime and Suspicion of Weapons swapped with Suspicious Bulge and Other. Some of the interesting parts of these values are that half of the reasons in first 2 eras are ambigious or subjective. Having inappropriate attire could be caused by many things, having a suspicious bulge is a very subjective reasons, and within the other category, there were generally very subjective descriptions. In the third era, these variables seem much less subjective and much more clear indiciators of a risk of crime. The inappropriate attire variable is still there, but it's now become the least important of the 6. The other 2 subjective variables have been swapped with variables that are much less subjective.
+
+Therefore, while there doesn't seem to be any clear discriminatory practices in how individuals were chosen to be searched or frisked, there did seem to be a lot of subjective factors that went to it, especially when Bloomberg was mayor. It seems like the policy enacted in 2013 did have an effect in ensuring that the justification for why someone is stopped, searched, and frisked was thorough.
+
+## Conclusion
+
+To begin, stop and frisk doesn't have a clear effect on decreasing the amount of crime an area sees. Further, there isn't a connection between the amount of stop and frisk and the amount of crime which does happen in an area. While past research has focussed a lot on discriminatory practices in the way individuals are chosen to be stopped, our research, which focusses on the method individuals are chosen to be searched or frisked, found that were not any glaringly discriminatory practices. However, during the Bloomberg administration, a lot of the factors which determined whether or not an individual was searched or frisked seemed extremely subjective. During de Blasio's term, the factors are more objective and substantiated by evidence.

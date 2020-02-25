@@ -1,0 +1,201 @@
+---
+title: "Samuel's Part"
+author: "Seungho (Samuel) Lee"
+date: "12/6/2019"
+knit:
+  
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, dpi = 300)
+```
+
+```{r packageCheck, include=FALSE}
+mypacks <- c("ggplot2","dplyr","readr","tidyr", "ROCR", "boot","class","randomForest","e1071", "stringr","partykit","rpart", "sp", "glmnet","forcats","tidyverse","caret", "readr", "readxl", "ggmap", "curl", "colourvalues", "shiny")  # what packages are needed?
+packs <- installed.packages()   # find installed package list
+install.me <- mypacks[!(mypacks %in% packs[,"Package"])]  #what needs to be installed?
+if (length(install.me) >= 1) install.packages(install.me, repos = "http://cran.us.r-project.org")   # install (if needed)
+lapply(mypacks, library, character.only=TRUE)  # load all packages
+```
+
+## Data Import & Prep
+
+```{r import, eval = FALSE}
+# importing frisk data
+url <- "https://www.nyclu.org/sites/default/files/field_documents/2018_sqf_database.xlsx"
+destfile <- "X2018_sqf_database.xlsx"
+curl::curl_download(url, destfile)
+SQF2018 <- read_excel(destfile) %>%
+  mutate(SUSPECT_HEIGHT = as.numeric(SUSPECT_HEIGHT))
+
+url <- "https://www1.nyc.gov/assets/nypd/downloads/excel/analysis_and_planning/stop-question-frisk/sqf-2017.xlsx"
+destfile <- "sqf-2017.xlsx"
+curl::curl_download(url, destfile)
+SQF2017 <- read_excel(destfile)
+
+SQF1718 <- SQF2018 %>%
+  mutate(STOP_FRISK_ID = STOP_FRISK_ID + nrow(SQF2017)) %>%
+  rename(STOP_FRISK_TIME = "Stop Frisk Time") %>%
+  full_join(SQF2017)
+
+SQF1718 <- SQF1718[order(SQF1718$STOP_FRISK_ID),]
+
+# importing codebook
+url <- "https://www.nyclu.org/sites/default/files/field_documents/2018_sqf_codebook.xlsx"
+destfile <- "X2018_sqf_codebook.xlsx"
+curl::curl_download(url, destfile)
+SQF2018_cb <- read_excel(destfile)
+
+# write to csv file
+#write_csv(SQF1718, "/Users/slee19/Documents/Junior\ First\ Semester/SQF1718.csv")
+
+View(SQF2018_cb)
+```
+```{r}
+SQF1718 <- read_csv("https://github.com/samuellee19/CS5_Project/raw/master/SQF1718.csv")
+```
+
+```{r, eval = FALSE}
+# make data.frame a spatial object
+test <- SQF1718[!is.na(SQF1718$STOP_LOCATION_X),]
+test <- test[!is.na(test$STOP_LOCATION_Y),]
+
+coordinates(test) <- ~STOP_LOCATION_X + STOP_LOCATION_Y
+
+
+test_coords <- as_tibble(coordinates(test))
+
+# SET the CRS of the object
+proj4string(test) <- CRS('+init=epsg:2263 +proj=lcc +lat_1=41.03333333333333 +lat_2=40.66666666666666 +lat_0=40.16666666666666 +lon_0=-74 +x_0=300000.0000000001 +y_0=0 +datum=NAD83 +units=us-ft +no_defs +ellps=GRS80 +towgs84=0,0,0')
+
+# Google API - Samuel's (perhaps replace later?)
+register_google(key = "AIzaSyD0R44_L_mFAxczh8cgTedmPDQRAmC2FBc")
+
+m <- get_map("New York", zoom = 10, scale = 4, maptype = "roadmap")
+
+library(ggrepel)
+ggmap(m) +
+  stat_density2d(aes(x=STOP_LOCATION_X, y=STOP_LOCATION_Y, fill = ..level.., alpha = ..level..),
+               size = 2, bins = 10, data = as.data.frame(test_latlong),
+               geom = "polygon") +
+  geom_density2d(data = as.data.frame(test_latlong), aes(x=STOP_LOCATION_X, y=STOP_LOCATION_Y), size = 0.1)
+
+# ggmap(m) + geom_point(aes(x=STOP_LOCATION_X, y=STOP_LOCATION_Y), data = as.data.frame(test_latlong))
+```
+
+```{r, eval = FALSE}
+manhattan <- get_map("Manhattan, New York", zoom = 12, scale = 4, maptype = "roadmap")
+
+ggmap(manhattan) +
+  stat_density2d(aes(x=STOP_LOCATION_X, y=STOP_LOCATION_Y, fill = ..level.., alpha = ..level..),
+               size = 2, bins = 10, data = as.data.frame(test_latlong),
+               geom = "polygon") +
+  geom_density2d(data = as.data.frame(test_latlong), aes(x=STOP_LOCATION_X, y=STOP_LOCATION_Y), size = 0.1) +
+  scale_alpha_continuous(range=c(0.1, 0.6))
+```
+
+```{r}
+library(plotly)
+
+# edit_r_environ(MAPBOX = your_unique_key)
+Sys.setenv("MAPBOX_TOKEN" = "pk.eyJ1Ijoic2xlZTE5IiwiYSI6ImNrNDZmbWl1aTBqcmgzZW8xeDJzcTBsMXEifQ.OvJvDwdVBfB02NaJVLq7Fw")
+```
+
+```{r}
+library(mapdeck)
+key <- 'pk.eyJ1Ijoic2xlZTE5IiwiYSI6ImNrNDZmbWl1aTBqcmgzZW8xeDJzcTBsMXEifQ.OvJvDwdVBfB02NaJVLq7Fw'    ## put your own token here
+
+test_latlong <- SQF1718[!is.na(SQF1718$STOP_LOCATION_X),]
+test_latlong <- test_latlong[!is.na(test_latlong$STOP_LOCATION_Y),]
+
+library(plotly)
+library(sf)
+
+# creating data as sf object
+plot_locations <- test_latlong
+coordinates(plot_locations) <- ~STOP_LOCATION_X + STOP_LOCATION_Y
+
+proj4string(plot_locations) <- CRS('+init=epsg:2263 +proj=lcc +lat_1=41.03333333333333 +lat_2=40.66666666666666 +lat_0=40.16666666666666 +lon_0=-74 +x_0=300000.0000000001 +y_0=0 +datum=NAD83 +units=us-ft +no_defs +ellps=GRS80 +towgs84=0,0,0')
+
+plot_locations <- plot_locations %>% spTransform(CRS("+init=epsg:4326"))
+
+plot_locations_sp <- st_as_sf(plot_locations, coords = c("STOP_LOCATION_X", "STOP_LOCATION_Y"), crs = utm18nCRS)
+
+
+
+# dividing the sf object into "Seven Major Felony Offenses" (NYC)
+plot_locations_sf <- test_latlong %>%
+  filter(SUSPECT_ARREST_OFFENSE %in% c("GRAND LARCENY", "ROBBERY", "BURGLARY", "ASSAULT", "RAPE", "TERRORISM", "GRAND LARCENY AUTO", "AUTO STRIPPING", "MURDER"))
+
+coordinates(plot_locations_sf) <- ~STOP_LOCATION_X + STOP_LOCATION_Y
+
+proj4string(plot_locations_sf) <- CRS('+init=epsg:2263 +proj=lcc +lat_1=41.03333333333333 +lat_2=40.66666666666666 +lat_0=40.16666666666666 +lon_0=-74 +x_0=300000.0000000001 +y_0=0 +datum=NAD83 +units=us-ft +no_defs +ellps=GRS80 +towgs84=0,0,0')
+
+plot_locations_sf <- plot_locations_sf %>%
+  spTransform(CRS("+init=epsg:4326"))
+
+plot_locations_sf <- st_as_sf(plot_locations_sf, coords = c("STOP_LOCATION_X", "STOP_LOCATION_Y"), crs = utm18nCRS)
+
+p <- plot_locations_sp %>%
+  plot_mapbox(mode = 'scattermapbox', hoverinfo='name') %>%
+  layout(font = list(color='white'),
+         plot_bgcolor = '#191A1A', paper_bgcolor = '#191A1A',
+         mapbox = list(style = 'dark'))
+
+mapdeck(token = "pk.eyJ1Ijoic2xlZTE5IiwiYSI6ImNrNDZmbWl1aTBqcmgzZW8xeDJzcTBsMXEifQ.OvJvDwdVBfB02NaJVLq7Fw", style = mapdeck_style("dark"), pitch = 45) %>%
+  add_screengrid(data = plot_locations_sp,
+                 weight = "weight",
+                 layer_id = "screengrid_layer",
+                 cell_size = 6,
+                 opacity = 0.4,
+                 colour_range = colourvalues::colour_values(1:6, palette = "plasma")) %>%
+  add_hexagon(data = plot_locations_sf,
+              layer_id = "hex_layer",
+              radius = 6
+              )
+```
+
+The bottom is a shiny coding that I will / published on my Shiny server
+```{r}
+library(shiny)
+library(shinydashboard)
+
+ui <- dashboardPage(
+    dashboardHeader(title = "New York Stop and Frisk")
+    , dashboardSidebar(
+        actionButton(inputId = "roads", label = "roads")
+    )
+    , dashboardBody(
+        mapdeckOutput(outputId = "map")
+    )
+)
+
+server <- function(input, output) {
+    
+    ## initialise a map
+    output$map <- renderMapdeck({
+        mapdeck()
+    })
+    
+    ## use an observer to add and remove layers
+    observeEvent({input$roads},{
+        
+        if ( input$roads %% 2 == 1 ) {
+            
+            mapdeck_update(map_id = "map") %>%
+                add_path(
+                    data = roads
+                    , layer_id = "myRoads"
+                    , stroke_colour = "RIGHT_LOC"
+                    , update_view = TRUE
+                    )
+        } else {
+          mapdeck_update(map_id = "map") %>%
+                clear_path(layer_id = "myRoads")
+        }
+    })
+}
+
+shinyApp(ui, server)
+```
